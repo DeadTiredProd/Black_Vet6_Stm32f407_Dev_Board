@@ -114,13 +114,18 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
-  {
-      /* Toggle both LEDs on PA6/PA7 (LED1_Pin / LED2_Pin) */
-      HAL_GPIO_TogglePin(GPIOA, LED1_Pin | LED2_Pin);
+{
+    /* LED1 ON, LED2 OFF */
+    HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOA, LED2_Pin, GPIO_PIN_RESET);
+    HAL_Delay(250);
 
-      /* Use HAL_Delay (requires SysTick) — your clock uses FLASH_LATENCY_2 already. */
-      HAL_Delay(50);
-  }
+    /* LED1 OFF, LED2 ON */
+    HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, LED2_Pin, GPIO_PIN_SET);
+    HAL_Delay(250);
+}
+
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
