@@ -1,4 +1,4 @@
-# STM32F407VET6 Blackboard Firmmware
+# STM32F407VET6 Blackboard Firmware
 
 Complete with USB CDC Support for Serial communication. 
 RX TX through CDC cause PA6|LED1 to light up briefly indicating transmission.
