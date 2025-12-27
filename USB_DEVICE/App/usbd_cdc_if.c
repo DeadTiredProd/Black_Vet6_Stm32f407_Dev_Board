@@ -260,38 +260,142 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
   * @param  Len: Number of data received (in bytes)
   * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
   */
-#define CMD_BUFFER_SIZE 64
+#define CMD_BUFFER_SIZE 265
 static char cmd_buffer[CMD_BUFFER_SIZE];
-static uint8_t cmd_index = 0;
+static uint16_t cmd_index = 0;
 
 
 
+#include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+
+/* send helper - non-blocking attempt to send (ignores USBD_BUSY). */
+static void send_reply(const char *reply)
+{
+    uint16_t len = (uint16_t)strlen(reply);
+    /* If endpoint busy, this returns USBD_BUSY. We simply ignore here to keep USB RX non-blocking.
+       If you need guaranteed delivery implement a small TX queue and retransmit on CDC_TransmitCplt_FS. */
+    CDC_Transmit_FS((uint8_t*)reply, len);
+}
+
+/* optional: normalize (trim + uppercase) so " ms0\r\n" or "ms0" works */
+static void normalize_cmd(char *s)
+{
+    /* trim leading */
+    char *start = s;
+    while (*start && isspace((unsigned char)*start)) start++;
+
+    /* trim trailing */
+    char *end = start + strlen(start);
+    while (end > start && isspace((unsigned char)*(end - 1))) end--;
+    *end = '\0';
+
+    /* shift to buffer start if needed */
+    if (start != s) memmove(s, start, (end - start) + 1);
+
+    /* uppercase in-place */
+    for (char *p = s; *p; ++p) *p = (char)toupper((unsigned char)*p);
+}
+
+//--------------------------------- command parsing ----------------------------//
+
+//Add commands here
+typedef enum
+{
+    CMD_UNKNOWN = 0,
+    CMD_MS0,
+    CMD_MS1,
+    CMD_HELP,
+} CommandId;
+
+//-------------Start of Commands-----------------//
+
+// map command string to CommandId
+static CommandId GetCommandId(const char *cmd)
+{
+    if (strcmp(cmd, "MS0") == 0)  return CMD_MS0;
+    if (strcmp(cmd, "MS1") == 0)  return CMD_MS1;
+    if (strcmp(cmd, "HELP") == 0) return CMD_HELP;
+
+    return CMD_UNKNOWN;
+}
+//----------End of commands------------------------//
+// process a command string and send reply
+void ParseCommand(char *cmd)
+{
+    switch (GetCommandId(cmd))
+    {
+        case CMD_MS0:
+            send_reply("Status OK\r\n");
+            break;
+
+        case CMD_MS1:
+            send_reply("Firmware version | " FIRMWARE_VERSION "\r\n");
+            break;
+
+        case CMD_HELP:
+            send_reply(
+                "Commands:\r\n"
+                "MS0  - Status check\r\n"
+                "MS1  - Firmware version\r\n"
+                "HELP - This help message\r\n"
+            );
+            break;
+
+        default:
+            send_reply("UNKNOWN COMMAND! - TYPE HELP FOR COMMAND LIST\r\n");
+            break;
+    }
+}
+
+//--------------------------------- end command parsing ------------------------//
 
 
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
     for (uint32_t i = 0; i < *Len; i++)
     {
-        char c = Buf[i];
+        char c = (char)Buf[i];
 
-        if (c == '\r' || c == '\n')  
+        if (c == '\r' || c == '\n')
         {
-            HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_RESET);
-            // Respond to command
-            const char reply[] = "Command received\r\n";
-            CDC_Transmit_FS((uint8_t*)reply, sizeof(reply)-1);
-            cmd_index = 0;
+            if (cmd_index > 0)
+            {
+                /* guard just in case */
+                if (cmd_index >= CMD_BUFFER_SIZE) cmd_index = CMD_BUFFER_SIZE - 1;
+                cmd_buffer[cmd_index] = '\0';   /* null-terminate */
+
+                normalize_cmd(cmd_buffer);      /* optional; remove if you want case-sensitive */
+
+                if (cmd_buffer[0] != '\0')      /* skip if empty after trim */
+                {
+                    ParseCommand(cmd_buffer);
+                }
+
+                cmd_index = 0;
+            }
+
+            #if defined(ENABLE_USB_CDC_LED_INDICATOR)
+              HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_RESET);
+            #endif
         }
         else
         {
-            if (cmd_index < CMD_BUFFER_SIZE - 1)
+            if (cmd_index < (CMD_BUFFER_SIZE - 1))
             {
-                cmd_buffer[cmd_index++] = c;  // store character
+                cmd_buffer[cmd_index++] = c;
+            }
+            else
+            {
+                /* Overflow guard - reset buffer and report error */
+                send_reply("ERROR: COMMAND TOO LONG\r\n");
+                cmd_index = 0;
             }
         }
     }
 
-    // Re-arm USB to receive next packet
+    /* Re-arm USB receive */
     USBD_CDC_SetRxBuffer(&hUsbDeviceFS, Buf);
     USBD_CDC_ReceivePacket(&hUsbDeviceFS);
 
@@ -326,7 +430,11 @@ uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
   USBD_CDC_SetTxBuffer(&hUsbDeviceFS, Buf, Len);
   result = USBD_CDC_TransmitPacket(&hUsbDeviceFS);
   /* USER CODE END 7 */
-  HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_RESET);
+
+  #if defined(ENABLE_USB_CDC_LED_INDICATOR)
+    HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_RESET);
+  #endif
+
   return result;
 }
 

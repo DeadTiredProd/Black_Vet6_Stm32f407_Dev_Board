@@ -22,6 +22,7 @@
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
 #include "configuration.h"
+#include "safeguards.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -179,7 +180,10 @@ int main(void)
 {
     /* Toggle LED2 */
     HAL_GPIO_TogglePin(GPIOA, LED2_Pin);
-    HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_SET);
+    
+    #if defined(ENABLE_USB_CDC_LED_INDICATOR)
+      HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_SET);
+    #endif
     /* Wait 500 ms */
     HAL_Delay(500);
 }
