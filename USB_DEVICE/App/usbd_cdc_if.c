@@ -20,6 +20,9 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_cdc_if.h"
+#include "configuration.h"
+#include "main.h"
+#include "stm32f4xx_hal_gpio.h"
 
 /* USER CODE BEGIN INCLUDE */
 
@@ -151,14 +154,13 @@ USBD_CDC_ItfTypeDef USBD_Interface_fops_FS =
   */
 static int8_t CDC_Init_FS(void)
 {
-  /* USER CODE BEGIN 3 */
-  /* Set Application Buffers */
   USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, 0);
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
-  return (USBD_OK);
-  /* USER CODE END 3 */
+  USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+    /* make sure LED1 starts OFF */
+  HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_SET);
+  return (0);
 }
-
 /**
   * @brief  DeInitializes the CDC media low layer
   * @retval USBD_OK if all operations are OK else USBD_FAIL
@@ -258,14 +260,49 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
   * @param  Len: Number of data received (in bytes)
   * @retval Result of the operation: USBD_OK if all operations are OK else USBD_FAIL
   */
+#define CMD_BUFFER_SIZE 64
+static char cmd_buffer[CMD_BUFFER_SIZE];
+static uint8_t cmd_index = 0;
+
+
+
+
+
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
-  /* USER CODE BEGIN 6 */
-  USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
-  USBD_CDC_ReceivePacket(&hUsbDeviceFS);
-  return (USBD_OK);
-  /* USER CODE END 6 */
+    for (uint32_t i = 0; i < *Len; i++)
+    {
+        char c = Buf[i];
+
+        if (c == '\r' || c == '\n')  
+        {
+            HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_RESET);
+            // Respond to command
+            const char reply[] = "Command received\r\n";
+            CDC_Transmit_FS((uint8_t*)reply, sizeof(reply)-1);
+            cmd_index = 0;
+        }
+        else
+        {
+            if (cmd_index < CMD_BUFFER_SIZE - 1)
+            {
+                cmd_buffer[cmd_index++] = c;  // store character
+            }
+        }
+    }
+
+    // Re-arm USB to receive next packet
+    USBD_CDC_SetRxBuffer(&hUsbDeviceFS, Buf);
+    USBD_CDC_ReceivePacket(&hUsbDeviceFS);
+
+    return USBD_OK;
 }
+
+
+
+
+
+
 
 /**
   * @brief  CDC_Transmit_FS

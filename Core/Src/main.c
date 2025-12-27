@@ -18,8 +18,10 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "stm32f4xx_hal_gpio.h"
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
+#include "configuration.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -50,7 +52,10 @@ SD_HandleTypeDef hsd;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+
+#ifdef ENABLE_SD
 static void MX_SDIO_SD_Init(void);
+#endif
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -60,6 +65,49 @@ static void MX_SDIO_SD_Init(void);
 
 /* USER CODE END 0 */
 
+
+// Call this anywhere in your code to send a string over USB CDC
+// send string over CDC, retrying briefly if the stack is busy
+void CDCSerialPrint(const char *str)
+{
+    if (str == NULL) return;
+
+    uint16_t len = (uint16_t)strlen(str);
+    uint32_t start = HAL_GetTick();
+
+    // try for up to 2 seconds to send (adjust timeout if you want)
+    while ((HAL_GetTick() - start) < 2000U)
+    {
+        uint8_t res = CDC_Transmit_FS((uint8_t*)str, len);
+        if (res == USBD_OK)        // sent
+            return;
+        if (res == USBD_FAIL)      // unrecoverable
+            return;
+        // USBD_BUSY or other: wait a bit and retry
+        HAL_Delay(10);
+    }
+}
+
+#ifndef ENABLE_SD
+// initialize USB device and send a single "connected" line once the host is ready
+void CDC_SERIAL_INIT(void)
+{
+    MX_USB_DEVICE_Init();
+
+    // Try to send a "Connected" message once the device is ready.
+    // We don't block forever — try for up to 5 seconds.
+    const char *msg = "Connected to STM32F407VET6 via USB CDC | SD CARD DISABLED WHILE CDC IS ENABLED Uncomment ENABLE_SD in configuration.h to enable SD card functionality Note disables CDC!\r\n";
+    uint32_t start = HAL_GetTick();
+
+    while ((HAL_GetTick() - start) < 5000U)
+    {
+        uint8_t res = CDC_Transmit_FS((uint8_t*)msg, (uint16_t)strlen(msg));
+        if (res == USBD_OK) break; // sent; done
+        // if busy, wait and retry
+        HAL_Delay(50);
+    }
+}
+#endif
 /**
   * @brief  The application entry point.
   * @retval int
@@ -89,8 +137,15 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  //MX_SDIO_SD_Init();
-  MX_USB_DEVICE_Init();
+  
+  //Disable SD initialization if USB CDC is desired, usbcdc not able to work with SD enabled currently
+  #ifdef ENABLE_SD
+    MX_SDIO_SD_Init();
+    // SD card functionality enabled - do not initialize USB CDC
+  #else
+    CDC_SERIAL_INIT();
+  #endif
+
 
  
   /* Make sure SysTick is highest priority */
@@ -111,7 +166,8 @@ int main(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-  HAL_GPIO_WritePin(GPIOA, LED1_Pin|LED2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, LED1_Pin|LED2_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_SET);
 
   /* USER CODE BEGIN 2 */
 
@@ -121,15 +177,11 @@ int main(void)
   /* USER CODE BEGIN WHILE */
  while(1)
 {
-    /* Toggle both LEDs */
-    HAL_GPIO_TogglePin(GPIOA, LED1_Pin | LED2_Pin);
-
-    /* Send USB CDC message */
-    char msg[] = "Hello from STM32!\r\n";
-    CDC_Transmit_FS((uint8_t*)msg, sizeof(msg)-1);
-
+    /* Toggle LED2 */
+    HAL_GPIO_TogglePin(GPIOA, LED2_Pin);
+    HAL_GPIO_WritePin(GPIOA, LED1_Pin, GPIO_PIN_SET);
     /* Wait 500 ms */
-    HAL_Delay(50);
+    HAL_Delay(500);
 }
 
 
@@ -184,6 +236,7 @@ void SystemClock_Config(void)
   }
 }
 
+#ifdef ENABLE_SD
 /**
   * @brief SDIO Initialization Function
   * @param None
@@ -207,7 +260,7 @@ static void MX_SDIO_SD_Init(void)
     Error_Handler();
   }
 }
-
+#endif
 /**
   * @brief GPIO Initialization Function
   * @param None
@@ -224,7 +277,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LED1_Pin|LED2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, LED1_Pin|LED2_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pins : LED1_Pin LED2_Pin */
   GPIO_InitStruct.Pin = LED1_Pin|LED2_Pin;
@@ -258,3 +311,4 @@ void assert_failed(uint8_t *file, uint32_t line)
 {
 }
 #endif /* USE_FULL_ASSERT */
+
